@@ -7,17 +7,22 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 var mode = flag.String("mode", "server", "运行模式")
 var filename = flag.String("filename", "", "要发送的文件名")
 var port = flag.Int("port", 10101, "端口号")
+var localIp = ""
+
+// 限制goroutine数量
+var limitChan = make(chan bool, 1000)
 
 func main() {
 	flag.Parse()
 	fmt.Println("Simple File Transfer Tool, Desined by shrek@Codans 2022")
 	fmt.Println("--------------------------------------------------------")
-	localIp := getIp()
+	localIp = getIp()
 	fmt.Println("Local IP:", localIp)
 	if *mode == "server" {
 		fmt.Println("Server Mode...")
@@ -31,15 +36,38 @@ func main() {
 			return
 		} else {
 			fmt.Println("Server Start Successfully!")
+
+			udpAddr, _ := net.ResolveUDPAddr("udp4", ":10102")
+			//监听端口
+
+			udpRun := false
+
+			udpConn, err := net.ListenUDP("udp", udpAddr)
+			defer udpConn.Close()
+			if err != nil {
+				fmt.Println(err)
+			} else {
+				fmt.Println("udp listening ... ", "Press Ctrl+C to exit")
+				//udp不需要Accept
+				udpRun = true
+			}
+
 			for {
+				if udpRun {
+					limitChan <- true
+					go handleUdpConnection(udpConn)
+				}
+
 				// 等待客户端连接
 				conn, err := s.Accept()
 				if err != nil {
 					fmt.Println("Accept Error:", err)
 					return
+				} else {
+					fmt.Println("tcp connected :", conn.RemoteAddr())
+					// 创建一个协程处理客户端请求
+					go handleClient(conn)
 				}
-				// 创建一个协程处理客户端请求
-				go handleClient(conn)
 			}
 		}
 	} else {
@@ -50,10 +78,83 @@ func main() {
 			return
 		} else {
 			fmt.Println("filename:", *filename)
+			listenServerIp()
 			sendFile()
 		}
 
 	}
+}
+
+// 读取udp消息
+func handleUdpConnection(udpConn *net.UDPConn) {
+	buf := make([]byte, 1024)
+	// 读取数据
+
+	len, udpAddr, err := udpConn.ReadFromUDP(buf)
+	if err != nil {
+		return
+	}
+	logContent := strings.Replace(string(buf), "\n", "", 1)
+	fmt.Println("server read len:", len)
+	fmt.Println("server read data:", logContent)
+
+	// 发送数据
+	len, err = udpConn.WriteToUDP([]byte(localIp+"\r\n"), udpAddr)
+	if err != nil {
+		return
+	}
+
+	fmt.Println("server write len:", len)
+	<-limitChan
+}
+
+// 获得本地IP的广播地址
+func getBroadcastIp(ip string) string {
+	broadcastIps := strings.Split(ip, ".")
+	broadcastIp := ""
+	for i := 0; i < len(broadcastIps)-1; i++ {
+		broadcastIp += broadcastIps[i]
+		if i != len(broadcastIps)-1 {
+			broadcastIp += "."
+		}
+	}
+
+	broadcastIp += "255"
+	return broadcastIp
+}
+
+// 侦听服务端的IP
+func listenServerIp() {
+	broadcastIp := getBroadcastIp(localIp)
+	fmt.Println("broadcast ip:", broadcastIp)
+	ip := net.ParseIP(broadcastIp)
+	srcAddr := &net.UDPAddr{IP: net.IPv4zero, Port: 0}
+	dstAddr := &net.UDPAddr{IP: ip, Port: 10102}
+
+	conn, err := net.ListenUDP("udp", srcAddr)
+	if err != nil {
+		fmt.Println(err)
+	}
+	defer conn.Close()
+
+	fmt.Println("udp listen ok ")
+
+	// 发送数据
+	len, err := conn.WriteToUDP([]byte("where?\r\n"), dstAddr)
+	if err != nil {
+		return
+	}
+	fmt.Println("client write len:", len)
+
+	buf := make([]byte, 1024)
+	//读取数据
+
+	len, _ = conn.Read(buf)
+	if len > 0 {
+		fmt.Println("client read len:", len)
+		fmt.Println("client read data:", string(buf))
+	}
+
 }
 
 // tcp handle
