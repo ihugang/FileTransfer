@@ -4,10 +4,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 var mode = flag.String("mode", "server", "运行模式")
@@ -21,10 +23,28 @@ var limitChan = make(chan bool, 1000)
 
 func main() {
 	flag.Parse()
+	fmt.Println("快捷局域网文件传输工具 V1.0, shrek@Codans设计编码")
 	fmt.Println("Simple File Transfer Tool, Desined by shrek@Codans 2022")
 	fmt.Println("--------------------------------------------------------")
+
+	LOG_FILE := "log.txt"
+	// open log file
+	logFile, err := os.OpenFile(LOG_FILE, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		log.Panic(err)
+	}
+	defer logFile.Close()
+
+	// Set log out put and enjoy :)
+	log.SetOutput(logFile)
+
+	// optional: log date-time, filename, and line number
+	log.SetFlags(log.Lshortfile | log.LstdFlags)
+
 	localIp = getIp()
 	fmt.Println("Local IP:", localIp)
+	log.Println("Local IP:", localIp)
+
 	if *mode == "server" {
 		fmt.Println("Server Mode...")
 
@@ -38,7 +58,7 @@ func main() {
 		} else {
 			fmt.Println("Server Start Successfully!")
 
-			udpAddr, _ := net.ResolveUDPAddr("udp4", ":10102")
+			udpAddr, _ := net.ResolveUDPAddr("udp4", "0.0.0.0:10101")
 			//监听端口
 
 			udpRun := false
@@ -96,7 +116,7 @@ func handleUdpConnection(udpConn *net.UDPConn) {
 		return
 	}
 	logContent := strings.Replace(string(buf), "\n", "", 1)
-	fmt.Println("udp server read data:", logContent)
+	log.Println("udp server read data:", logContent)
 
 	// 发送数据
 	len, err = udpConn.WriteToUDP([]byte(localIp+"\r\n"), udpAddr)
@@ -104,7 +124,7 @@ func handleUdpConnection(udpConn *net.UDPConn) {
 		return
 	}
 
-	fmt.Println("udp socket", udpAddr, "write len:", len)
+	log.Println("udp socket", udpAddr, "write len:", len)
 	<-limitChan
 }
 
@@ -128,8 +148,9 @@ func listenUdpServerIp() {
 	broadcastIp := getBroadcastIp(localIp)
 	fmt.Println("broadcast ip:", broadcastIp)
 	ip := net.ParseIP(broadcastIp)
+
 	srcAddr := &net.UDPAddr{IP: net.IPv4zero, Port: 0}
-	dstAddr := &net.UDPAddr{IP: ip, Port: 10102}
+	dstAddr := &net.UDPAddr{IP: ip, Port: 10101}
 
 	conn, err := net.ListenUDP("udp", srcAddr)
 	if err != nil {
@@ -145,7 +166,7 @@ func listenUdpServerIp() {
 		return
 	}
 	fmt.Println("udp client write len:", len)
-
+	time.Sleep(time.Duration(1) * time.Second)
 	buf := make([]byte, 1024)
 	//读取数据
 
@@ -154,6 +175,7 @@ func listenUdpServerIp() {
 		fmt.Println("udp client read len:", len)
 		remoteIp = strings.ReplaceAll(string(buf[:len]), "\r\n", "")
 		fmt.Println("udp client read data:", remoteIp)
+		conn.Close()
 	}
 
 }
@@ -171,10 +193,12 @@ func handleClient(conn net.Conn) {
 	filename := string(buf[:n])
 	filename = filepath.Base(filename)
 	fmt.Println("Receive:", filename)
+	log.Println("Receive:", filename)
+
 	// 创建一个文件
 	file, err := os.Create(filename)
 	if err != nil {
-		fmt.Println("Create File Error:", err)
+		log.Println("Create File Error:", err)
 		return
 	}
 	defer file.Close()
@@ -187,13 +211,13 @@ func handleClient(conn net.Conn) {
 				fmt.Println("Receive File Successfully!")
 				return
 			}
-			fmt.Println("Read Error:", err)
+			log.Println("Read Error:", err)
 			return
 		}
 		// 写入文件
 		file.Write(buf[:n])
 		length = length + n
-		fmt.Fprintf(os.Stdout, "%d bytes recieved.\r", length)
+		fmt.Printf("%d bytes recieved.\r", length)
 	}
 }
 
@@ -304,6 +328,8 @@ func sendFile() {
 		fmt.Println("File Does Not Exist!")
 		return
 	}
+
+	time.Sleep(time.Duration(1) * time.Second)
 
 	// 发送文件内容
 	file, err := os.Open(*filename)
