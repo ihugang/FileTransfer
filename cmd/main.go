@@ -14,6 +14,7 @@ var mode = flag.String("mode", "server", "运行模式")
 var filename = flag.String("filename", "", "要发送的文件名")
 var port = flag.Int("port", 10101, "端口号")
 var localIp = ""
+var remoteIp = ""
 
 // 限制goroutine数量
 var limitChan = make(chan bool, 1000)
@@ -78,7 +79,7 @@ func main() {
 			return
 		} else {
 			fmt.Println("filename:", *filename)
-			listenServerIp()
+			listenUdpServerIp()
 			sendFile()
 		}
 
@@ -95,8 +96,7 @@ func handleUdpConnection(udpConn *net.UDPConn) {
 		return
 	}
 	logContent := strings.Replace(string(buf), "\n", "", 1)
-	fmt.Println("server read len:", len)
-	fmt.Println("server read data:", logContent)
+	fmt.Println("udp server read data:", logContent)
 
 	// 发送数据
 	len, err = udpConn.WriteToUDP([]byte(localIp+"\r\n"), udpAddr)
@@ -104,7 +104,7 @@ func handleUdpConnection(udpConn *net.UDPConn) {
 		return
 	}
 
-	fmt.Println("server write len:", len)
+	fmt.Println("udp socket", udpAddr, "write len:", len)
 	<-limitChan
 }
 
@@ -124,7 +124,7 @@ func getBroadcastIp(ip string) string {
 }
 
 // 侦听服务端的IP
-func listenServerIp() {
+func listenUdpServerIp() {
 	broadcastIp := getBroadcastIp(localIp)
 	fmt.Println("broadcast ip:", broadcastIp)
 	ip := net.ParseIP(broadcastIp)
@@ -144,15 +144,16 @@ func listenServerIp() {
 	if err != nil {
 		return
 	}
-	fmt.Println("client write len:", len)
+	fmt.Println("udp client write len:", len)
 
 	buf := make([]byte, 1024)
 	//读取数据
 
 	len, _ = conn.Read(buf)
 	if len > 0 {
-		fmt.Println("client read len:", len)
-		fmt.Println("client read data:", string(buf))
+		fmt.Println("udp client read len:", len)
+		remoteIp = strings.ReplaceAll(string(buf[:len]), "\r\n", "")
+		fmt.Println("udp client read data:", remoteIp)
 	}
 
 }
@@ -177,6 +178,7 @@ func handleClient(conn net.Conn) {
 		return
 	}
 	defer file.Close()
+	length := 0
 	// 接收文件内容
 	for {
 		n, err := conn.Read(buf)
@@ -190,6 +192,8 @@ func handleClient(conn net.Conn) {
 		}
 		// 写入文件
 		file.Write(buf[:n])
+		length = length + n
+		fmt.Fprintf(os.Stdout, "%d bytes recieved.\r", length)
 	}
 }
 
@@ -269,7 +273,16 @@ func isPrivateIP(ip net.IP) bool {
 // client 发送文件
 func sendFile() {
 	// 创建一个连接
-	conn, err := net.Dial("tcp", fmt.Sprintf(":%d", *port))
+	for {
+		if len(remoteIp) > 0 {
+			break
+		}
+	}
+
+	addr := fmt.Sprintf("%s:%d", remoteIp, *port)
+	fmt.Println("connect to:", addr)
+
+	conn, err := net.Dial("tcp", addr)
 	defer conn.Close()
 	if err != nil {
 		fmt.Println("Dial Error:", err)
